@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Sistema Geotérmico Anti-Hielo — 2 Bandas Independientes</title>
+<title>Sistema Geotérmico Anti-Hielo — 2 Banda Transversal</title>
 <style>
   html, body {
     margin:0;
@@ -497,6 +497,134 @@ const rctx = roadCanvas.getContext('2d');
 const roadTex = new THREE.CanvasTexture(roadCanvas);
 const roadState = { heatSurface:true };
 
+// Huella térmica superficial del sistema transversal.
+// Se representa encima de cada ramal individual y no como una banda lineal continua.
+const HEAT_TEX = {
+  xMin: -3.45,
+  xMax:  4.05,
+  zMin: -1.65,
+  zMax:  1.65,
+  texLeft: 30,
+  texRight: 994,
+  texTop: 42,
+  texBottom: 470
+};
+
+function zMapHeat(yModel){
+  return HEAT_TEX.zMin + (yModel / 0.90) * (HEAT_TEX.zMax - HEAT_TEX.zMin);
+}
+
+function worldXToTex(x){
+  return HEAT_TEX.texLeft + ((x - HEAT_TEX.xMin) / (HEAT_TEX.xMax - HEAT_TEX.xMin)) * (HEAT_TEX.texRight - HEAT_TEX.texLeft);
+}
+
+function worldZToTex(z){
+  return HEAT_TEX.texBottom - ((z - HEAT_TEX.zMin) / (HEAT_TEX.zMax - HEAT_TEX.zMin)) * (HEAT_TEX.texBottom - HEAT_TEX.texTop);
+}
+
+function drawLegHeatPatch(xWorld, zA, zB, pulse, alphaScale=1.0){
+  const x = worldXToTex(xWorld);
+  const y1 = worldZToTex(zA);
+  const y2 = worldZToTex(zB);
+  const yTop = Math.min(y1, y2);
+  const yBottom = Math.max(y1, y2);
+  const h = yBottom - yTop;
+  const yMid = 0.5 * (yTop + yBottom);
+
+  // Propagación térmica centrada exactamente sobre cada tramo recto del tubo.
+  const coreHalfW = 12;
+  const haloHalfW = 42;
+  const padY = 20;
+
+  // Halo difuso lateral
+  const halo = rctx.createRadialGradient(x, yMid, 2, x, yMid, haloHalfW);
+  const a = (0.11 + pulse * 0.13) * alphaScale;
+  halo.addColorStop(0.00, `rgba(255,186,84,${a + 0.16})`);
+  halo.addColorStop(0.18, `rgba(246,149,46,${a + 0.08})`);
+  halo.addColorStop(0.55, `rgba(240,128,35,${a})`);
+  halo.addColorStop(1.00, 'rgba(240,128,35,0)');
+  rctx.fillStyle = halo;
+  rctx.fillRect(x - haloHalfW, yTop - padY, haloHalfW * 2, h + padY * 2);
+
+  // Núcleo caliente directamente sobre el tubo
+  const core = rctx.createLinearGradient(0, yTop - padY, 0, yBottom + padY);
+  core.addColorStop(0.00, 'rgba(240,128,35,0)');
+  core.addColorStop(0.18, `rgba(242,140,40,${0.12 * alphaScale + pulse * 0.05})`);
+  core.addColorStop(0.50, `rgba(255,185,82,${0.24 * alphaScale + pulse * 0.10})`);
+  core.addColorStop(0.82, `rgba(242,140,40,${0.12 * alphaScale + pulse * 0.05})`);
+  core.addColorStop(1.00, 'rgba(240,128,35,0)');
+  rctx.fillStyle = core;
+  rctx.fillRect(x - coreHalfW, yTop - padY, coreHalfW * 2, h + padY * 2);
+}
+
+function drawEndCapHeatPatch(x1World, x2World, zWorld, pulse, alphaScale=1.0){
+  const x1 = worldXToTex(x1World);
+  const x2 = worldXToTex(x2World);
+  const xMid = 0.5 * (x1 + x2);
+  const y = worldZToTex(zWorld);
+
+  const rx = Math.max(24, Math.abs(x2 - x1) * 0.95);
+  const ry = 34;
+
+  const halo = rctx.createRadialGradient(xMid, y, 4, xMid, y, Math.max(rx, ry));
+  const a = (0.10 + pulse * 0.12) * alphaScale;
+  halo.addColorStop(0.00, `rgba(255,192,88,${a + 0.15})`);
+  halo.addColorStop(0.26, `rgba(245,148,45,${a + 0.08})`);
+  halo.addColorStop(0.62, `rgba(240,128,35,${a})`);
+  halo.addColorStop(1.00, 'rgba(240,128,35,0)');
+  rctx.fillStyle = halo;
+  rctx.fillRect(xMid - rx, y - ry, rx * 2, ry * 2);
+
+  // Refuerzo central sobre el codo/U
+  const core = rctx.createLinearGradient(xMid - rx, y, xMid + rx, y);
+  core.addColorStop(0.00, 'rgba(240,128,35,0)');
+  core.addColorStop(0.25, `rgba(243,144,42,${0.10 * alphaScale + pulse * 0.05})`);
+  core.addColorStop(0.50, `rgba(255,190,88,${0.22 * alphaScale + pulse * 0.08})`);
+  core.addColorStop(0.75, `rgba(243,144,42,${0.10 * alphaScale + pulse * 0.05})`);
+  core.addColorStop(1.00, 'rgba(240,128,35,0)');
+  rctx.fillStyle = core;
+  rctx.fillRect(xMid - rx, y - 10, rx * 2, 20);
+}
+
+function drawBranchGeothermalHeat(cx, nearZ, farZ, pulse, alphaScale=1.0){
+  const gapWorld = 0.12;
+  const x1 = cx - gapWorld / 2;
+  const x2 = cx + gapWorld / 2;
+
+  drawLegHeatPatch(x1, nearZ, farZ, pulse, alphaScale);
+  drawLegHeatPatch(x2, nearZ, farZ, pulse, alphaScale * 0.98);
+  drawEndCapHeatPatch(x1, x2, farZ, pulse, alphaScale);
+}
+
+function drawTransversalHeat(pulse){
+  // mismas posiciones de ramales que en el modelo 3D
+  const y0_1_m = 0.02;
+  const y1_1_m = 0.02 + 0.90*(2.6/7.0);
+  const y0_2_m = 0.52;
+  const y1_2_m = 0.52 + (y1_1_m - y0_1_m);
+
+  const z0a = zMapHeat(y0_1_m);
+  const z1a = zMapHeat(y1_1_m);
+  const z0b = zMapHeat(y0_2_m);
+  const z1b = zMapHeat(y1_2_m);
+
+  const N = 8;
+  const step = (HEAT_TEX.xMax - HEAT_TEX.xMin) / Math.max(N - 1, 1);
+
+  // banda inferior: cerca en z0a, codo/U en z1a
+  for (let i=0; i<N; i++){
+    const x = HEAT_TEX.xMin + i * step;
+    drawBranchGeothermalHeat(x, z0a, z1a, pulse, 1.0);
+  }
+
+  // banda superior intercalada: colectores al borde opuesto,
+  // por lo que el ramal "sale" desde z1b y cierra en z0b.
+  for (let i=0; i<N - 1; i++){
+    const x = HEAT_TEX.xMin + 0.5 * step + i * step;
+    drawBranchGeothermalHeat(x, z1b, z0b, pulse, 0.96);
+  }
+}
+
 function drawRoad(pulse){
   rctx.clearRect(0,0,1024,512);
   rctx.fillStyle = '#25282d';
@@ -512,19 +640,7 @@ function drawRoad(pulse){
   rctx.putImageData(img,0,0);
 
   if (roadState.heatSurface) {
-    const lanes = [0.35, 0.65];
-    lanes.forEach(v=>{
-      const cy = v * 512;
-      const grad = rctx.createLinearGradient(0, cy-84, 0, cy+84);
-      const a = 0.30 + pulse*0.30;
-      grad.addColorStop(0.00, 'rgba(240,128,35,0)');
-      grad.addColorStop(0.42, `rgba(240,128,35,${a})`);
-      grad.addColorStop(0.50, `rgba(255,158,56,${a+0.14})`);
-      grad.addColorStop(0.58, `rgba(240,128,35,${a})`);
-      grad.addColorStop(1.00, 'rgba(240,128,35,0)');
-      rctx.fillStyle = grad;
-      rctx.fillRect(0, cy-84, 1024, 168);
-    });
+    drawTransversalHeat(pulse);
   }
 
   rctx.strokeStyle = '#e6e8eb';
@@ -711,20 +827,26 @@ function linePoints(p0, p1, samples, t0, t1, temp0, temp1){
   return pts;
 }
 
-function uTurnPoints(x1, x2, y, zFar, samples, t0, t1, temp0, temp1){
+function uTurnPoints(xStart, xEnd, y, zFar, samples, t0, t1, temp0, temp1){
   const pts = [];
-  const xc = 0.5*(x1+x2);
-  const rx = Math.abs(x2-x1)/2;
+  const xc = 0.5 * (xStart + xEnd);
+  const rx = Math.abs(xEnd - xStart) / 2;
   const rz = 0.105;
+
+  // Si el ramal va de izquierda a derecha, recorre la semicircunferencia de pi a 0.
+  // Si va de derecha a izquierda, la recorre de 0 a pi.
+  const forward = xStart <= xEnd;
+
   for (let i=0; i<=samples; i++){
-    const u = i/samples;
-    const a = Math.PI - u*Math.PI;
-    const x = xc + rx*Math.cos(a);
-    const z = zFar + rz*Math.sin(a);
+    const u = i / samples;
+    const a = forward ? (Math.PI - u * Math.PI) : (u * Math.PI);
+    const x = xc + rx * Math.cos(a);
+    const z = zFar + rz * Math.sin(a);
+
     pts.push({
       p: new THREE.Vector3(x, y, z),
-      tt: t0 + (t1-t0)*u,
-      temp: temp0 + (temp1-temp0)*u
+      tt: t0 + (t1 - t0) * u,
+      temp: temp0 + (temp1 - temp0) * u
     });
   }
   return pts;
@@ -851,47 +973,83 @@ function registerPipeAnimation(name, pipeObj, glowObj, arrowFracs, nParticles){
 }
 
 function createBranchCircuit(name, xCenter, nearZ, farZ, supplyZ, returnZ, bandIndex, mirror=false){
-  let x1 = xCenter - GAP_VIS/2;
-  let x2 = xCenter + GAP_VIS/2;
-
-  if (mirror){
-    const tmp = x1;
-    x1 = x2;
-    x2 = tmp;
-  }
+  // La geometría de la U debe ser la misma en ambos lados.
+  // Solo cambia el sentido del flujo, no la forma espacial del codo.
+  const xLeft = xCenter - GAP_VIS/2;
+  const xRight = xCenter + GAP_VIS/2;
+  const xSupply = mirror ? xRight : xLeft;
+  const xReturn = mirror ? xLeft : xRight;
 
   let pathData = [];
 
+  function addVectorSegment(vectors, t0, t1, temp0, temp1){
+    const seg = vectors.map((p, i) => {
+      const u = vectors.length === 1 ? 0 : i / (vectors.length - 1);
+      return {
+        p,
+        tt: t0 + (t1 - t0) * u,
+        temp: temp0 + (temp1 - temp0) * u
+      };
+    });
+    appendToPath(pathData, seg);
+  }
+
+  // Entrada vertical corta desde el manifold al tubo
   appendToPath(pathData, connectorPoints([
-    new THREE.Vector3(x1, yPipe, supplyZ),
-    new THREE.Vector3(x1, yPipe, nearZ)
-  ], 0.00, 0.08, 45, 44, 10));
+    new THREE.Vector3(xSupply, yPipe, supplyZ),
+    new THREE.Vector3(xSupply, yPipe, nearZ)
+  ], 0.00, 0.08, 45, 44, 12));
 
+  // Ida por la primera pata del ramal
   appendToPath(pathData, linePoints(
-    new THREE.Vector3(x1, yPipe, nearZ),
-    new THREE.Vector3(x1, yPipe, farZ),
-    42, 0.08, 0.43, 44, 37
+    new THREE.Vector3(xSupply, yPipe, nearZ),
+    new THREE.Vector3(xSupply, yPipe, farZ),
+    46, 0.08, 0.43, 44, 37
   ));
 
-  appendToPath(pathData, uTurnPoints(
-    x1, x2, yPipe, farZ, 18, 0.43, 0.55, 37, 35
-  ));
+  // U geométrica base: SIEMPRE se dibuja con la misma forma espacial,
+  // de izquierda a derecha. Si el flujo va al contrario, solo se invierte
+  // el orden de recorrido de esos puntos, pero no la forma de la curva.
+  const uPositions = [];
+  const samplesU = 32;
+  const xc = 0.5 * (xLeft + xRight);
+  const rx = Math.abs(xRight - xLeft) / 2;
+  const rz = 0.105;
 
+  // El signo del codo depende de la banda:
+  // si farZ > nearZ, abre hacia +Z;
+  // si farZ < nearZ, abre hacia -Z.
+  // Así las U de ambos lados tienen la misma forma visual,
+  // solo enfrentadas respecto al eje central de la vía.
+  const arcSign = Math.sign(farZ - nearZ) || 1;
+
+  for (let i=0; i<=samplesU; i++){
+    const u = i / samplesU;
+    const a = Math.PI - u * Math.PI;
+    const x = xc + rx * Math.cos(a);
+    const z = farZ + arcSign * rz * Math.sin(a);
+    uPositions.push(new THREE.Vector3(x, yPipe, z));
+  }
+
+  addVectorSegment(mirror ? [...uPositions].reverse() : uPositions, 0.43, 0.55, 37, 35);
+
+  // Regreso por la segunda pata del ramal
   appendToPath(pathData, linePoints(
-    new THREE.Vector3(x2, yPipe, farZ),
-    new THREE.Vector3(x2, yPipe, nearZ),
-    42, 0.55, 0.90, 35, 28
+    new THREE.Vector3(xReturn, yPipe, farZ),
+    new THREE.Vector3(xReturn, yPipe, nearZ),
+    46, 0.55, 0.90, 35, 28
   ));
 
+  // Salida al manifold de retorno
   appendToPath(pathData, connectorPoints([
-    new THREE.Vector3(x2, yPipe, nearZ),
-    new THREE.Vector3(x2, yPipe, returnZ)
-  ], 0.90, 1.00, 28, 24, 10));
+    new THREE.Vector3(xReturn, yPipe, nearZ),
+    new THREE.Vector3(xReturn, yPipe, returnZ)
+  ], 0.90, 1.00, 28, 24, 12));
 
-  const branch = createColoredTube(pathData, 0.043, 14, 260);
+  const branch = createColoredTube(pathData, 0.043, 14, 300);
   branch.name = name;
 
-  const glowGeo = new THREE.TubeGeometry(branch.curve, 260, 0.073, 8, false);
+  const glowGeo = new THREE.TubeGeometry(branch.curve, 300, 0.073, 8, false);
   const glowMat = new THREE.MeshBasicMaterial({
     color: bandIndex === 0 ? 0xff7a18 : 0xffaa22,
     transparent:true,
@@ -909,9 +1067,9 @@ function createBranchCircuit(name, xCenter, nearZ, farZ, supplyZ, returnZ, bandI
     tubeMesh: branch.tubeMesh,
     glow,
     arrows: [
-      addArrowOnCurve(branch.curve, 0.22, 0.82),
-      addArrowOnCurve(branch.curve, 0.64, 0.82),
-      addArrowOnCurve(branch.curve, 0.86, 0.82)
+      addArrowOnCurve(branch.curve, 0.20, 0.82),
+      addArrowOnCurve(branch.curve, 0.52, 0.82),
+      addArrowOnCurve(branch.curve, 0.84, 0.82)
     ],
     particles: createParticlesForCurve(branch, 5)
   };
@@ -1051,8 +1209,6 @@ makeLeader(new THREE.Vector3(-2.62, -0.02, -3.10), new THREE.Vector3(-3.55, -0.7
 makeLabel('Pozo/Acuífero', 'rgba(20,25,32,0.92)', new THREE.Vector3(-2.35, -1.10, -4.12), 0.58);
 makeLeader(new THREE.Vector3(-2.70, -1.10, -4.12), new THREE.Vector3(-3.27, -1.05, -4.12));
 
-makeLabel('transversal enfrentado e intercalado', 'rgba(20,25,32,0.88)', new THREE.Vector3(1.00, 0.46, 1.70), 0.73);
-makeLeader(new THREE.Vector3(1.00, 0.20, 1.52), new THREE.Vector3(0.95, -0.56, 0.88));
 
 // =============================================================
 // Panel de capas
